@@ -1,0 +1,20 @@
+[package]
+name = "fans"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name="tx"
+path= "src/bin/tx.rs"
+
+[[bin]]
+name="rx"
+path="src/bin/rx.rs"
+
+[dependencies]
+lm-sensors = "0.3.2"
+plotters = { version = "0.3.7", features = ["point_series"] }
+plotters-piston = "0.3.0"
+piston_window = "0.112.0"
+winit = "0.28"
+pixels = "0.13"
