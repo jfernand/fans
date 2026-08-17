@@ -1,6 +1,5 @@
 use pixels::{Pixels, SurfaceTexture};
 use std::collections::VecDeque;
-use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,21 +39,20 @@ fn main() {
     // Shared ring buffer of rows (each row is exactly 256 bytes)
     let rows: Arc<Mutex<VecDeque<[u8; WIDTH as usize]>>> = Arc::new(Mutex::new(VecDeque::with_capacity(HEIGHT as usize)));
 
-    // Spawn background UDP receiver
+    // Spawn background ZeroMQ receiver (PULL)
     {
         let rows_bg = Arc::clone(&rows);
         thread::spawn(move || {
-            let socket = UdpSocket::bind("0.0.0.0:1337").expect("failed to bind UDP socket on 1337");
-            // nonblocking receive loop
-            socket
-                .set_nonblocking(true)
-                .expect("failed to set nonblocking");
-            let mut buf = [0u8; WIDTH as usize];
+            let ctx = zmq::Context::new();
+            let socket = ctx.socket(zmq::PULL).expect("failed to create ZMQ PULL socket");
+            socket.bind("tcp://0.0.0.0:1337").expect("failed to bind ZMQ PULL at tcp://0.0.0.0:1337");
             let mut last_sleep = Instant::now();
             loop {
-                match socket.recv(&mut buf) {
-                    Ok(sz) => {
-                        if sz == buf.len() {
+                match socket.recv_bytes(zmq::DONTWAIT) {
+                    Ok(bytes) => {
+                        if bytes.len() == WIDTH as usize {
+                            let mut buf = [0u8; WIDTH as usize];
+                            buf.copy_from_slice(&bytes);
                             if let Ok(mut q) = rows_bg.lock() {
                                 if q.len() as u32 == HEIGHT {
                                     q.pop_front();
@@ -62,17 +60,17 @@ fn main() {
                                 q.push_back(buf);
                             }
                         } else {
-                            // Ignore packets with incorrect size
+                            // Ignore messages with incorrect size
                         }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    Err(zmq::Error::EAGAIN) => {
                         // nothing to read now
                     }
                     Err(_) => {
                         // transient error; ignore
                     }
                 }
-                // Throttle a bit to avoid busy-spin if no packets
+                // Throttle a bit to avoid busy-spin if no messages
                 if last_sleep.elapsed() < Duration::from_millis(5) {
                     thread::sleep(Duration::from_millis(1));
                 }
@@ -84,8 +82,8 @@ fn main() {
     // Create winit window and pixels surface
     let event_loop = EventLoop::new();
     let scale: u32 = 2; // present at 512x1024 but logical buffer remains 256x512
-    let mut window = WindowBuilder::new()
-        .with_title("UDP Waterfall (port 1337)")
+    let window = WindowBuilder::new()
+        .with_title("ZeroMQ Waterfall (tcp://*:1337)")
         .with_inner_size(LogicalSize::new((WIDTH * scale) as f64, (HEIGHT * scale) as f64))
         .with_min_inner_size(LogicalSize::new((WIDTH) as f64, (HEIGHT) as f64))
         .build(&event_loop)
