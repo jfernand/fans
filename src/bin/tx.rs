@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::net::UdpSocket;
 use std::os::unix::fs::FileExt;
 use std::thread;
 use std::time::Duration;
@@ -12,21 +11,19 @@ fn read_ec_io() -> std::io::Result<Vec<u8>> {
 }
 
 fn main() {
-    // Create a UDP socket once; bind to an ephemeral local port.
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("failed to bind UDP socket");
-    let dest = "127.0.0.1:1337";
+    // ZeroMQ PUSH socket connects to the receiver's PULL socket
+    let ctx = zmq::Context::new();
+    let socket = ctx.socket(zmq::PUSH).expect("failed to create ZMQ PUSH socket");
+    let endpoint = "tcp://127.0.0.1:1337";
+    socket.connect(endpoint).expect("failed to connect ZMQ PUSH to receiver");
 
     loop {
         match read_ec_io() {
             Ok(buf) => {
-                match socket.send_to(&buf, dest) {
-                    Ok(sent) => {
-                        print!(".");
-                        if sent != buf.len() {
-                            eprintln!("warning: only sent {} of {} bytes", sent, buf.len());
-                        }
-                    }
-                    Err(e) => eprintln!("UDP send_to error: {}", e),
+                if let Err(e) = socket.send(buf, 0) {
+                    eprintln!("ZMQ send error: {}", e);
+                } else {
+                    print!(".");
                 }
             }
             Err(e) => eprintln!("read_ec_io error: {}", e),
