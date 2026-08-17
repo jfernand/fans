@@ -11,6 +11,7 @@ use winit::window::WindowBuilder;
 // Configuration
 const WIDTH: u32 = 256; // horizontal axis: offset 0..255
 const HEIGHT: u32 = 512; // number of rows in the waterfall (history depth)
+const X_SCALE: u32 = 3; // horizontally scale each pixel by 3x
 
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     // h in [0, 360), s, v in [0,1]
@@ -81,18 +82,18 @@ fn main() {
 
     // Create winit window and pixels surface
     let event_loop = EventLoop::new();
-    let scale: u32 = 2; // present at 512x1024 but logical buffer remains 256x512
+    let scale: u32 = 2; // present at 512x1024 but logical buffer is (WIDTH*X_SCALE) x HEIGHT
     let window = WindowBuilder::new()
         .with_title("ZeroMQ Waterfall (tcp://*:1337)")
-        .with_inner_size(LogicalSize::new((WIDTH * scale) as f64, (HEIGHT * scale) as f64))
-        .with_min_inner_size(LogicalSize::new((WIDTH) as f64, (HEIGHT) as f64))
+        .with_inner_size(LogicalSize::new((WIDTH * X_SCALE * scale) as f64, (HEIGHT * scale) as f64))
+        .with_min_inner_size(LogicalSize::new((WIDTH * X_SCALE) as f64, HEIGHT as f64))
         .build(&event_loop)
         .expect("failed to build window");
 
     let mut pixels = {
         let size = window.inner_size();
         let surface_texture = SurfaceTexture::new(size.width, size.height, &window);
-        Pixels::new(WIDTH, HEIGHT, surface_texture).expect("failed to create pixels surface")
+        Pixels::new(WIDTH * X_SCALE, HEIGHT, surface_texture).expect("failed to create pixels surface")
     };
 
     event_loop.run(move |event, _, control_flow| {
@@ -131,11 +132,15 @@ fn main() {
                 for (ri, row) in snapshot.iter().enumerate() {
                     let y = (HEIGHT as usize - rows_len) + ri; // start from top so rows fill from bottom
                     if y >= HEIGHT as usize { continue; }
-                    let base = y as u32 * WIDTH;
+                    let row_base = y as u32 * (WIDTH * X_SCALE);
                     for (x, b) in row.iter().copied().enumerate() {
-                        let idx = (base as usize + x) * 4;
                         let color = byte_to_color(b);
-                        frame[idx..idx + 4].copy_from_slice(&color);
+                        let start_px = (row_base as usize + x * X_SCALE as usize) * 4;
+                        // Triplicate horizontally
+                        for dx in 0..(X_SCALE as usize) {
+                            let idx = start_px + dx * 4;
+                            frame[idx..idx + 4].copy_from_slice(&color);
+                        }
                     }
                 }
                 if let Err(e) = pixels.render() {
